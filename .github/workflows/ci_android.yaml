@@ -1,0 +1,173 @@
+name: Android CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.github/workflows/ci_android.yaml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'android/**'
+      - 'src/**'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - '.github/workflows/ci_android.yaml'
+  workflow_dispatch:
+
+env:
+  ANDROID_API: "26"
+  ABI: "arm64-v8a"
+  NDK_VERSION: "27.2.12479018"
+  QT_VERSION: "6.8.1"
+  OPENSSL_VERSION: "3.3.2"
+  BOOST_VERSION: "1.87.0"
+  LIBTORRENT_VERSION: "2.0.10"
+
+jobs:
+  build:
+    name: Build qBittorrent Android APK
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK ${{ env.NDK_VERSION }}
+        run: |
+          sdkmanager "ndk;${{ env.NDK_VERSION }}"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build python3-pip \
+            libgl1-mesa-dev libglib2.0-dev
+
+      - name: Install aqtinstall
+        run: pip3 install aqtinstall
+
+      - name: Cache Qt ${{ env.QT_VERSION }} (host + Android)
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-android-arm64
+
+      - name: Install Qt host tools (Linux gcc_64)
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
+            -O "${{ github.workspace }}/Qt" \
+            -m qtimageformats
+
+      - name: Install Qt for Android arm64-v8a
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        run: |
+          aqt install-qt linux android ${{ env.QT_VERSION }} android_arm64_v8a \
+            -O "${{ github.workspace }}/Qt" \
+            -m qtimageformats
+
+      - name: Set Qt environment variables
+        run: |
+          echo "QT_HOST_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/gcc_64" >> "$GITHUB_ENV"
+          echo "QT_ANDROID_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/android_arm64_v8a" >> "$GITHUB_ENV"
+
+      - name: Cache native dependencies (OpenSSL + Boost + libtorrent)
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: android/deps
+          key: android-deps-api${{ env.ANDROID_API }}-openssl${{ env.OPENSSL_VERSION }}-boost${{ env.BOOST_VERSION }}-lt${{ env.LIBTORRENT_VERSION }}-ndk${{ env.NDK_VERSION }}-v1
+
+      - name: Build native dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT}"
+          export ANDROID_API="${ANDROID_API}"
+          export ABI="${ABI}"
+          export OPENSSL_VERSION="${OPENSSL_VERSION}"
+          export BOOST_VERSION="${BOOST_VERSION}"
+          export LIBTORRENT_VERSION="${LIBTORRENT_VERSION}"
+          export JOBS="$(nproc)"
+          bash android/scripts/build-deps.sh
+
+      - name: Cache qBittorrent build directory
+        id: cache-qbt-build
+        uses: actions/cache@v4
+        with:
+          path: android/build/qbt
+          key: android-qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-v1
+
+      - name: Build qBittorrent-nox for Android
+        run: |
+          export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT}"
+          export QT_ANDROID_ROOT="${QT_ANDROID_ROOT}"
+          export QT_HOST_ROOT="${QT_HOST_ROOT}"
+          export ANDROID_API="${ANDROID_API}"
+          export ABI="${ABI}"
+          export JOBS="$(nproc)"
+          bash android/scripts/build-qbt.sh
+
+      - name: Verify native binary exists
+        run: |
+          ls -lh android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so
+          file android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}-v1
+          restore-keys: |
+            gradle-
+
+      - name: Bootstrap Gradle wrapper JAR
+        run: bash android/scripts/bootstrap-gradle.sh
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbittorrent-android-debug-${{ github.sha }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Build release APK (unsigned)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon -x lintRelease
+
+      - name: Upload release APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qbittorrent-android-release-unsigned-${{ github.sha }}
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 90

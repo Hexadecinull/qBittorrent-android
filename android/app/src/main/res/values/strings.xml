@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">qBittorrent</string>
+    <string name="starting_service">Starting qBittorrent…</string>
+    <string name="failed_to_start">Failed to start qBittorrent. Check logs.</string>
+    <string name="action_stop">Stop</string>
+    <string name="notification_channel_name">qBittorrent Service</string>
+    <string name="notification_channel_description">Background torrent download service</string>
+    <string name="notification_title_starting">qBittorrent</string>
+    <string name="notification_text_starting">Starting…</string>
+    <string name="notification_title_running">qBittorrent</string>
+    <string name="notification_text_running">Running · WebUI on port %1$d</string>
+    <string name="notification_title_error">qBittorrent</string>
+    <string name="notification_text_error">Failed to start — tap for details</string>
+</resources>

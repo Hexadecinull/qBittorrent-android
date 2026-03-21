@@ -1,0 +1,7 @@
+## Copy this file to local.properties and fill in the values.
+## local.properties is gitignored and never committed.
+
+sdk.dir=/home/YOUR_USER/Android/Sdk
+
+## Optional: point directly to the NDK if not using the SDK-managed one
+#ndk.dir=/home/YOUR_USER/Android/Sdk/ndk/27.2.12479018
