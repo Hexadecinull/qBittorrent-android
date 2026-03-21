@@ -51,52 +51,49 @@ jobs:
 
       - name: Install Android NDK ${{ env.NDK_VERSION }}
         run: |
-          sdkmanager "ndk;${{ env.NDK_VERSION }}"
+          sdkmanager --install "ndk;${{ env.NDK_VERSION }}"
           echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
 
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential ninja-build python3-pip \
-            libgl1-mesa-dev libglib2.0-dev
+            build-essential ninja-build cmake python3-pip \
+            libgl1-mesa-dev libglib2.0-dev libxkbcommon-dev
 
       - name: Install aqtinstall
-        run: pip3 install aqtinstall
+        run: pip3 install "aqtinstall==3.3.0"
 
-      - name: Cache Qt ${{ env.QT_VERSION }} (host + Android)
+      - name: Cache Qt ${{ env.QT_VERSION }}
         id: cache-qt
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ github.workspace }}/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-android-arm64
+          path: ${{ github.workspace }}/Qt
+          key: qt-${{ env.QT_VERSION }}-linux-desktop-android-arm64-v1
 
-      - name: Install Qt host tools (Linux gcc_64)
+      - name: Install Qt host tools (gcc_64)
         if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
           aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -O "${{ github.workspace }}/Qt" \
-            -m qtimageformats
+            -O "${{ github.workspace }}/Qt"
 
-      - name: Install Qt for Android arm64-v8a
+      - name: Install Qt for Android (arm64-v8a)
         if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
           aqt install-qt linux android ${{ env.QT_VERSION }} android_arm64_v8a \
-            -O "${{ github.workspace }}/Qt" \
-            -m qtimageformats
+            -O "${{ github.workspace }}/Qt"
 
-      - name: Set Qt environment variables
+      - name: Export Qt paths
         run: |
           echo "QT_HOST_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/gcc_64" >> "$GITHUB_ENV"
           echo "QT_ANDROID_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/android_arm64_v8a" >> "$GITHUB_ENV"
 
-      - name: Cache native dependencies (OpenSSL + Boost + libtorrent)
+      - name: Cache native dependencies
         id: cache-deps
         uses: actions/cache@v4
         with:
           path: android/deps
-          key: android-deps-api${{ env.ANDROID_API }}-openssl${{ env.OPENSSL_VERSION }}-boost${{ env.BOOST_VERSION }}-lt${{ env.LIBTORRENT_VERSION }}-ndk${{ env.NDK_VERSION }}-v1
+          key: deps-api${{ env.ANDROID_API }}-ssl${{ env.OPENSSL_VERSION }}-boost${{ env.BOOST_VERSION }}-lt${{ env.LIBTORRENT_VERSION }}-ndk${{ env.NDK_VERSION }}-v1
 
       - name: Build native dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
@@ -110,12 +107,12 @@ jobs:
           export JOBS="$(nproc)"
           bash android/scripts/build-deps.sh
 
-      - name: Cache qBittorrent build directory
-        id: cache-qbt-build
+      - name: Cache qBittorrent CMake build dir
+        id: cache-qbt
         uses: actions/cache@v4
         with:
           path: android/build/qbt
-          key: android-qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-v1
+          key: qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-v1
 
       - name: Build qBittorrent-nox for Android
         run: |
@@ -127,10 +124,13 @@ jobs:
           export JOBS="$(nproc)"
           bash android/scripts/build-qbt.sh
 
-      - name: Verify native binary exists
+      - name: Verify native binary
         run: |
           ls -lh android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so
           file android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so
+
+      - name: Bootstrap Gradle wrapper JAR
+        run: bash android/scripts/bootstrap-gradle.sh
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -138,12 +138,8 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}-v1
-          restore-keys: |
-            gradle-
-
-      - name: Bootstrap Gradle wrapper JAR
-        run: bash android/scripts/bootstrap-gradle.sh
+          key: gradle-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/libs.versions.toml') }}-v1
+          restore-keys: gradle-
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
@@ -164,7 +160,7 @@ jobs:
         working-directory: android
         run: ./gradlew :app:assembleRelease --no-daemon -x lintRelease
 
-      - name: Upload release APK
+      - name: Upload release APK (unsigned)
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
