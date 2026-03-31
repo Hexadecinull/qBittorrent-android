@@ -76,6 +76,7 @@ jobs:
           dir: ${{ github.workspace }}/Qt
           cache: true
           cache-key-prefix: qt-host
+          aqtversion: '==3.1.*'
 
       - name: Save Qt host root and resolved version
         run: |
@@ -95,6 +96,7 @@ jobs:
           dir: ${{ github.workspace }}/Qt
           cache: true
           cache-key-prefix: qt-android
+          aqtversion: '==3.1.*'
 
       - name: Save Qt Android root
         run: |
