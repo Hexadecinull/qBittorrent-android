@@ -69,18 +69,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/Qt
-          # Bump cache key if Qt install options change
-          key: qt-${{ env.QT_VERSION }}-linux-desktop-android-arm64-qttools-v1
+          key: qt-${{ env.QT_VERSION }}-linux-desktop-android-arm64-v1
 
       - name: Install Qt host tools (gcc_64)
         if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
-          # qttools is required so CMake can find Qt6::LinguistTools.
-          # CheckPackages.cmake calls find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
-          # and without the qttools module installed that configure step fails.
+          # Qt6::LinguistTools (lupdate/lrelease) is part of the standard gcc_64
+          # base installation — no -m flag needed. aqt's -m flag is only for
+          # addon modules (qtcharts, qt3d, qtwebengine, etc.), not for core tools.
           aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -O "${{ github.workspace }}/Qt" \
-            -m qttools
+            -O "${{ github.workspace }}/Qt"
 
       - name: Install Qt for Android (arm64-v8a)
         if: steps.cache-qt.outputs.cache-hit != 'true'
