@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANDROID_DIR="$(dirname "$SCRIPT_DIR")"
-ROOT_DIR="$(dirname "$ANDROID_DIR")"
 DEPS_DIR="${ANDROID_DIR}/deps"
 BUILD_DIR="${ANDROID_DIR}/build/deps"
 
@@ -58,13 +57,9 @@ build_openssl() {
 
     local toolchain
     toolchain="$(ndk_toolchain_dir)"
-    local compiler="${toolchain}/bin/aarch64-linux-android${ANDROID_API}-clang"
-    local ar="${toolchain}/bin/llvm-ar"
-    local ranlib="${toolchain}/bin/llvm-ranlib"
-
-    export CC="${compiler}"
-    export AR="${ar}"
-    export RANLIB="${ranlib}"
+    export CC="${toolchain}/bin/aarch64-linux-android${ANDROID_API}-clang"
+    export AR="${toolchain}/bin/llvm-ar"
+    export RANLIB="${toolchain}/bin/llvm-ranlib"
 
     ./Configure android-arm64 \
         -D__ANDROID_API__="${ANDROID_API}" \
@@ -100,7 +95,6 @@ build_boost() {
 
     local toolchain
     toolchain="$(ndk_toolchain_dir)"
-    local clang="${toolchain}/bin/aarch64-linux-android${ANDROID_API}-clang"
     local clangxx="${toolchain}/bin/aarch64-linux-android${ANDROID_API}-clang++"
 
     ./bootstrap.sh --with-libraries=system,filesystem,date_time
@@ -153,11 +147,17 @@ build_libtorrent() {
 
     local toolchain_file="${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake"
 
-    cmake -S . -B build \
+    # Must match the STL used by build-qbt.sh (c++_static) so the final
+    # linked binary has a single, self-contained C++ runtime.
+    local android_stl="c++_static"
+
+    cmake \
+        -S . \
+        -B build \
         -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}" \
         -DANDROID_ABI="${ABI}" \
         -DANDROID_PLATFORM="android-${ANDROID_API}" \
-        -DANDROID_STL="c++_shared" \
+        -DANDROID_STL="${android_stl}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="${prefix}" \
         -DBUILD_SHARED_LIBS=OFF \

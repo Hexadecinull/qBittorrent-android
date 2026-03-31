@@ -22,11 +22,11 @@ check_env() {
         exit 1
     fi
     if [[ -z "${QT_ANDROID_ROOT}" ]]; then
-        echo "error: QT_ANDROID_ROOT is not set (path to Qt for Android, e.g. ~/Qt/6.8.0/android_arm64_v8a)"
+        echo "error: QT_ANDROID_ROOT is not set (e.g. ~/Qt/6.8.0/android_arm64_v8a)"
         exit 1
     fi
     if [[ -z "${QT_HOST_ROOT}" ]]; then
-        echo "error: QT_HOST_ROOT is not set (path to Qt host tools, e.g. ~/Qt/6.8.0/gcc_64)"
+        echo "error: QT_HOST_ROOT is not set (e.g. ~/Qt/6.8.0/gcc_64)"
         exit 1
     fi
     if [[ ! -d "${DEPS_DIR}/libtorrent" ]]; then
@@ -35,18 +35,46 @@ check_env() {
     fi
 }
 
+ndk_host_dir() {
+    local host
+    case "$(uname -s)" in
+        Linux)  host="linux-x86_64" ;;
+        Darwin) host="darwin-x86_64" ;;
+        *) echo "error: unsupported host OS"; exit 1 ;;
+    esac
+    echo "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/${host}"
+}
+
 build_qbt() {
     echo "==> Cross-compiling qBittorrent-nox for Android ${ABI}"
 
     local toolchain_file="${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake"
+    local host_dir
+    host_dir="$(ndk_host_dir)"
+    local sysroot="${host_dir}/sysroot"
+
+    # Resolve NDK zlib — point CMake at the NDK sysroot copy to avoid
+    # find_package(ZLIB) resolving to the host /usr/include/zlib.h.
+    local zlib_lib="${sysroot}/usr/lib/aarch64-linux-android/${ANDROID_API}/libz.so"
+    [[ -f "${zlib_lib}" ]] || zlib_lib="${sysroot}/usr/lib/aarch64-linux-android/libz.so"
+    local zlib_inc="${sysroot}/usr/include"
+
+    # Use c++_static so the output binary is fully self-contained.
+    # c++_shared would require bundling libc++_shared.so from the NDK in
+    # jniLibs/ — easy to forget and causes a "library not found" crash on
+    # device. Since libqbittorrent_nox.so is the only C++ consumer in this
+    # process, static linkage has no downsides.
+    local android_stl="c++_static"
 
     mkdir -p "${BUILD_DIR}"
 
-    cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" \
+    cmake \
+        -S "${ROOT_DIR}" \
+        -B "${BUILD_DIR}" \
         -DCMAKE_TOOLCHAIN_FILE="${toolchain_file}" \
         -DANDROID_ABI="${ABI}" \
         -DANDROID_PLATFORM="android-${ANDROID_API}" \
-        -DANDROID_STL="c++_shared" \
+        -DANDROID_STL="${android_stl}" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_FIND_ROOT_PATH="${DEPS_DIR}/openssl;${DEPS_DIR}/boost;${DEPS_DIR}/libtorrent;${QT_ANDROID_ROOT}" \
         -DQT_HOST_PATH="${QT_HOST_ROOT}" \
@@ -56,6 +84,8 @@ build_qbt() {
         -DBoost_ROOT="${DEPS_DIR}/boost" \
         -DBoost_NO_SYSTEM_PATHS=ON \
         -DLibtorrentRasterbar_DIR="${DEPS_DIR}/libtorrent/lib/cmake/LibtorrentRasterbar" \
+        -DZLIB_LIBRARY="${zlib_lib}" \
+        -DZLIB_INCLUDE_DIR="${zlib_inc}" \
         -DGUI=OFF \
         -DWEBUI=ON \
         -DDBUS=OFF \
@@ -88,6 +118,7 @@ build_qbt() {
     echo ""
     echo "qBittorrent-nox built successfully."
     echo "  Output : ${OUTPUT_JNI}/libqbittorrent_nox.so (${size_human})"
+    echo "  STL    : ${android_stl} (self-contained)"
 }
 
 main() {

@@ -10,7 +10,7 @@ This directory contains everything needed to build and run qBittorrent on Androi
 android/
 ├── app/                          Android Studio module
 │   └── src/main/
-│       ├── kotlin/               Kotlin app layer (service, UI, boot receiver)
+│       ├── kotlin/               Kotlin app layer (service, UI, settings, boot receiver)
 │       ├── jniLibs/arm64-v8a/    Compiled qbittorrent-nox binary (as .so)
 │       └── res/                  Resources (layouts, strings, drawables)
 ├── cmake/                        CMake helpers for cross-compilation
@@ -27,7 +27,7 @@ android/
 └── gradle/                       Gradle wrapper config
 ```
 
-The root `CMakeLists.txt` is used directly — no fork of the build system. The Android folder only adds the tooling to cross-compile it.
+The root `CMakeLists.txt` is used directly — no fork of the build system required. The Android folder only adds the tooling to cross-compile it, plus two small patches to `src/app/` (see [C++ patches](#c-patches-required) below).
 
 ---
 
@@ -38,11 +38,33 @@ The root `CMakeLists.txt` is used directly — no fork of the build system. The 
 | Android NDK | r27c (`27.2.12479018`) |
 | Android SDK | API 35 (build tools 35.0.0) |
 | Qt for Android (arm64-v8a) | 6.8.x |
-| Qt host tools (gcc_64) | 6.8.x (same version) |
+| Qt host tools (gcc_64) | 6.8.x (same version) — **with `qttools` module** |
 | JDK | 17+ |
 | CMake | 3.25+ |
 | Ninja | any recent |
 | Python 3 + aqtinstall | for Qt installation |
+
+---
+
+## C++ patches required
+
+Before building, apply two small patches to the upstream C++ source. Both add `&& !defined(Q_OS_ANDROID)` to guards that call `::daemon()` — a POSIX function not provided by Android's Bionic libc.
+
+**`src/app/main.cpp`** — two occurrences of the same guard:
+```diff
+-#if defined(DISABLE_GUI) && !defined(Q_OS_WIN)
++#if defined(DISABLE_GUI) && !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
+```
+
+**`src/app/cmdoptions.cpp`** — three occurrences:
+```diff
+-#elif !defined(Q_OS_WIN)
++#elif !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
+```
+
+The patched files are provided in `android/patches/` and are applied automatically by `build-qbt.sh` if they haven't been applied already.
+
+No other source changes are needed. `QLocalSocket`, `isatty()`, `setrlimit()`, and all other Unix APIs used by qbt-nox are available in Bionic. `QProcess` (used only for the search-engine plugin feature) compiles normally but is a no-op at runtime, which is fine since the search plugin isn't relevant to a headless server.
 
 ---
 
@@ -70,11 +92,12 @@ Install [aqtinstall](https://github.com/miurahr/aqtinstall):
 pip install aqtinstall
 ```
 
-Install Qt — you need **both** the host tools and the Android target:
+Install Qt — you need **both** the host tools (with `qttools`) and the Android target:
 
 ```sh
-aqt install-qt linux desktop  6.8.1 gcc_64           -O ~/Qt -m qtimageformats
-aqt install-qt linux android  6.8.1 android_arm64_v8a -O ~/Qt -m qtimageformats
+# qttools is required for Qt6::LinguistTools (used by CMake configure)
+aqt install-qt linux desktop  6.8.1 gcc_64            -O ~/Qt -m qttools
+aqt install-qt linux android  6.8.1 android_arm64_v8a  -O ~/Qt
 ```
 
 Set the environment variables:
@@ -89,8 +112,6 @@ export QT_ANDROID_ROOT=~/Qt/6.8.1/android_arm64_v8a
 ```sh
 bash android/scripts/bootstrap-gradle.sh
 ```
-
-This downloads and verifies the `gradle-wrapper.jar`. It only needs to run once.
 
 ---
 
@@ -133,8 +154,6 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 ## Dependency versions
 
-Versions are controlled by environment variables with built-in defaults:
-
 | Variable | Default |
 |----------|---------|
 | `OPENSSL_VERSION` | `3.3.2` |
@@ -142,19 +161,37 @@ Versions are controlled by environment variables with built-in defaults:
 | `LIBTORRENT_VERSION` | `2.0.10` |
 | `ANDROID_API` | `26` |
 
+### Why `c++_static`?
+
+Both build scripts use `-DANDROID_STL=c++_static`. With `c++_shared` the runtime linker requires `libc++_shared.so` to be present alongside the binary at launch. Forgetting to place that file in `jniLibs/` produces a silent crash with no useful error message. Since `libqbittorrent_nox.so` is the only C++ consumer in this process, static linkage is strictly cleaner — one self-contained file, no extra tracking.
+
 ---
 
 ## Runtime behaviour
 
-- The Foreground Service writes a `qBittorrent.conf` to internal storage on first launch (no overwrite on subsequent launches, so user settings are preserved).
+- The Foreground Service writes a `qBittorrent.conf` to internal storage on first launch (not overwritten on subsequent launches, so user settings are preserved).
 - Downloads go to the app's external files directory (`Android/data/org.qbittorrent.android/files/Downloads`).
 - The WebUI listens on `127.0.0.1:8080` — not exposed to other devices on the network by default.
-- The `QT_QPA_PLATFORM=offscreen` environment variable is set so Qt does not attempt to open a display.
-- Magnet links and `.torrent` files open in qBittorrent via Android intent filters.
+- `QT_QPA_PLATFORM=offscreen` is set so Qt does not attempt to open a display.
+- Magnet links and `.torrent` files open in qBittorrent via Android intent filters. Both are POSTed directly to `/api/v2/torrents/add`.
+- The service has a watchdog that restarts `qbittorrent-nox` on unexpected crashes, with exponential back-off (2 s → 4 s → … → 60 s), giving up after 5 restarts.
 
 ### Default credentials
 
-qBittorrent's default WebUI username is `admin` and the default password is `adminadmin`. Change these immediately in Settings → Web UI after first launch.
+qBittorrent's default WebUI username is `admin` and the default password is `adminadmin`. Change these immediately in the WebUI Settings → Web UI after first launch.
+
+---
+
+## Settings screen
+
+The app includes a Settings screen (reachable from the loading overlay button or the notification "Settings" action) with:
+
+- **Start on boot** toggle (defaults to on)
+- **Restart / Stop** service buttons
+- **WebUI address** display and "Open in browser" button
+- **Battery optimization** exemption request (with live status)
+- **All-files storage access** request on API 30+ (with live status)
+- App version info
 
 ---
 
@@ -174,18 +211,19 @@ The GitHub Actions workflow at `.github/workflows/ci_android.yaml` runs on every
 
 1. Sets up JDK 17 and Android SDK
 2. Installs NDK r27c via `sdkmanager`
-3. Caches Qt (host + Android) by version
-4. Caches native dependencies by version hash
-5. Builds dependencies if the cache misses
+3. Caches Qt (host + Android, including `qttools`) by version
+4. Caches native dependencies by version + STL type
+5. Builds dependencies on cache miss
 6. Cross-compiles `qbittorrent-nox`
-7. Assembles the debug APK
-8. Uploads both debug and release APKs as artefacts
+7. Verifies the binary has no `libc++_shared.so` dependency
+8. Assembles the debug APK
+9. Uploads both debug and release APKs as artefacts
 
 ---
 
 ## Signing for release
 
-To sign a release APK, create a keystore and set these secrets in your GitHub repository:
+Create a keystore and set these secrets in your GitHub repository:
 
 ```
 KEYSTORE_BASE64     base64-encoded .jks file
@@ -216,4 +254,4 @@ buildTypes {
 
 ## Minimum supported Android version
 
-Android 8.0 (API 26 / Oreo). This is required for `startForegroundService` and the `FOREGROUND_SERVICE` permission model used by the service.
+Android 8.0 (API 26 / Oreo). Required for `startForegroundService` and the `FOREGROUND_SERVICE` permission model.

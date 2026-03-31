@@ -14,7 +14,13 @@ class BootReceiver : BroadcastReceiver() {
         ) return
 
         val prefs = context.getSharedPreferences("qbt_prefs", Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("start_on_boot", false)) return
+
+        // First-install default: write true so autostart works out of the box.
+        // The user can disable it from Settings.
+        if (!prefs.contains("start_on_boot")) {
+            prefs.edit().putBoolean("start_on_boot", true).apply()
+        }
+        if (!prefs.getBoolean("start_on_boot", true)) return
 
         val serviceIntent = Intent(context, QBittorrentService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

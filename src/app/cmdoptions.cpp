@@ -380,7 +380,7 @@ namespace
             + u'\n'
 #ifndef DISABLE_GUI
             + NO_SPLASH_OPTION.usage() + wrapText(QCoreApplication::translate("CMD Options", "Disable splash screen")) + u'\n'
-#elif !defined(Q_OS_WIN)
+#elif !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
             + DAEMON_OPTION.usage() + wrapText(QCoreApplication::translate("CMD Options", "Run in daemon-mode (background)")) + u'\n'
 #endif
         //: Use appropriate short form or abbreviation of "directory"
@@ -426,7 +426,7 @@ QBtCommandLineParameters::QBtCommandLineParameters(const QProcessEnvironment &en
     , relativeFastresumePaths(RELATIVE_FASTRESUME.value(env))
 #ifndef DISABLE_GUI
     , noSplash(NO_SPLASH_OPTION.value(env))
-#elif !defined(Q_OS_WIN)
+#elif !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
     , shouldDaemonize(DAEMON_OPTION.value(env))
 #endif
     , webUIPort(WEBUI_PORT_OPTION.value(env, -1))
@@ -488,7 +488,7 @@ QBtCommandLineParameters parseCommandLine(const QStringList &args)
             {
                 result.noSplash = true;
             }
-#elif !defined(Q_OS_WIN)
+#elif !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
             else if (arg == DAEMON_OPTION)
             {
                 result.shouldDaemonize = true;

@@ -69,13 +69,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/Qt
-          key: qt-${{ env.QT_VERSION }}-linux-desktop-android-arm64-v1
+          # Bump cache key if Qt install options change
+          key: qt-${{ env.QT_VERSION }}-linux-desktop-android-arm64-qttools-v1
 
       - name: Install Qt host tools (gcc_64)
         if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
+          # qttools is required so CMake can find Qt6::LinguistTools.
+          # CheckPackages.cmake calls find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
+          # and without the qttools module installed that configure step fails.
           aqt install-qt linux desktop ${{ env.QT_VERSION }} gcc_64 \
-            -O "${{ github.workspace }}/Qt"
+            -O "${{ github.workspace }}/Qt" \
+            -m qttools
 
       - name: Install Qt for Android (arm64-v8a)
         if: steps.cache-qt.outputs.cache-hit != 'true'
@@ -85,7 +90,7 @@ jobs:
 
       - name: Export Qt paths
         run: |
-          echo "QT_HOST_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/gcc_64" >> "$GITHUB_ENV"
+          echo "QT_HOST_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/gcc_64"         >> "$GITHUB_ENV"
           echo "QT_ANDROID_ROOT=${{ github.workspace }}/Qt/${{ env.QT_VERSION }}/android_arm64_v8a" >> "$GITHUB_ENV"
 
       - name: Cache native dependencies
@@ -93,7 +98,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android/deps
-          key: deps-api${{ env.ANDROID_API }}-ssl${{ env.OPENSSL_VERSION }}-boost${{ env.BOOST_VERSION }}-lt${{ env.LIBTORRENT_VERSION }}-ndk${{ env.NDK_VERSION }}-v1
+          # Include 'static' in key so old c++_shared caches are not reused
+          key: deps-api${{ env.ANDROID_API }}-ssl${{ env.OPENSSL_VERSION }}-boost${{ env.BOOST_VERSION }}-lt${{ env.LIBTORRENT_VERSION }}-ndk${{ env.NDK_VERSION }}-static-v1
 
       - name: Build native dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
@@ -112,7 +118,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android/build/qbt
-          key: qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-v1
+          key: qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-static-v1
 
       - name: Build qBittorrent-nox for Android
         run: |
@@ -126,8 +132,16 @@ jobs:
 
       - name: Verify native binary
         run: |
-          ls -lh android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so
-          file android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so
+          BIN="android/app/src/main/jniLibs/arm64-v8a/libqbittorrent_nox.so"
+          ls -lh "${BIN}"
+          file "${BIN}"
+          # Confirm no runtime dependency on libc++_shared.so
+          # (would indicate the wrong ANDROID_STL was used)
+          if readelf -d "${BIN}" | grep -q "libc++_shared"; then
+            echo "ERROR: binary depends on libc++_shared.so — rebuild with ANDROID_STL=c++_static"
+            exit 1
+          fi
+          echo "STL check passed: binary is self-contained"
 
       - name: Bootstrap Gradle wrapper JAR
         run: bash android/scripts/bootstrap-gradle.sh

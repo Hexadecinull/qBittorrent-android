@@ -15,7 +15,7 @@ object NotificationHelper {
     const val NOTIFICATION_ID = 1001
 
     enum class State {
-        STARTING, RUNNING, ERROR
+        STARTING, RUNNING, ERROR, STOPPED
     }
 
     fun createNotificationChannel(context: Context) {
@@ -49,22 +49,25 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val settingsIntent = PendingIntent.getActivity(
+            context,
+            2,
+            Intent(context, SettingsActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val (title, text) = when (state) {
-            State.STARTING -> Pair(
-                context.getString(R.string.notification_title_starting),
-                context.getString(R.string.notification_text_starting)
-            )
-            State.RUNNING -> Pair(
-                context.getString(R.string.notification_title_running),
-                context.getString(R.string.notification_text_running, QBittorrentService.WEB_UI_PORT)
-            )
-            State.ERROR -> Pair(
-                context.getString(R.string.notification_title_error),
-                context.getString(R.string.notification_text_error)
-            )
+            State.STARTING -> context.getString(R.string.notification_title_starting) to
+                    context.getString(R.string.notification_text_starting)
+            State.RUNNING  -> context.getString(R.string.notification_title_running) to
+                    context.getString(R.string.notification_text_running, QBittorrentService.WEB_UI_PORT)
+            State.ERROR    -> context.getString(R.string.notification_title_error) to
+                    context.getString(R.string.notification_text_error)
+            State.STOPPED  -> context.getString(R.string.notification_title_stopped) to
+                    context.getString(R.string.notification_text_stopped)
         }
 
-        return NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
@@ -73,9 +76,18 @@ object NotificationHelper {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(
                 R.drawable.ic_notification,
+                context.getString(R.string.action_settings),
+                settingsIntent
+            )
+
+        if (state == State.RUNNING || state == State.STARTING) {
+            builder.addAction(
+                R.drawable.ic_notification,
                 context.getString(R.string.action_stop),
                 stopIntent
             )
-            .build()
+        }
+
+        return builder.build()
     }
 }

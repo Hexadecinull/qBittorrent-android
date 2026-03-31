@@ -228,7 +228,7 @@ int main(int argc, char *argv[])
         // Check if qBittorrent is already running
         if (app->hasAnotherInstance())
         {
-#if defined(DISABLE_GUI) && !defined(Q_OS_WIN)
+#if defined(DISABLE_GUI) && !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
             if (params.shouldDaemonize)
             {
                 throw CommandLineParameterError(QCoreApplication::translate("Main", "You cannot use %1: qBittorrent is already running.")
@@ -283,7 +283,7 @@ int main(int argc, char *argv[])
             app->setAttribute(Qt::AA_DontShowIconsInMenus);
 #endif
 
-#if defined(DISABLE_GUI) && !defined(Q_OS_WIN)
+#if defined(DISABLE_GUI) && !defined(Q_OS_WIN) && !defined(Q_OS_ANDROID)
         if (params.shouldDaemonize)
         {
             app.reset(); // Destroy current application instance

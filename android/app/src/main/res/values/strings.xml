@@ -3,13 +3,56 @@
     <string name="app_name">qBittorrent</string>
     <string name="starting_service">Starting qBittorrent…</string>
     <string name="failed_to_start">Failed to start qBittorrent. Check logs.</string>
+    <string name="settings">Settings</string>
+
+    <!-- Actions -->
     <string name="action_stop">Stop</string>
+    <string name="action_settings">Settings</string>
+
+    <!-- Notification channel -->
     <string name="notification_channel_name">qBittorrent Service</string>
     <string name="notification_channel_description">Background torrent download service</string>
+
+    <!-- Notification states -->
     <string name="notification_title_starting">qBittorrent</string>
     <string name="notification_text_starting">Starting…</string>
     <string name="notification_title_running">qBittorrent</string>
     <string name="notification_text_running">Running · WebUI on port %1$d</string>
     <string name="notification_title_error">qBittorrent</string>
     <string name="notification_text_error">Failed to start — tap for details</string>
+    <string name="notification_title_stopped">qBittorrent</string>
+    <string name="notification_text_stopped">Stopped</string>
+
+    <!-- Intent handling feedback -->
+    <string name="magnet_added">Magnet link added</string>
+    <string name="torrent_added">Torrent added</string>
+    <string name="add_failed">Failed to add — is qBittorrent running?</string>
+
+    <!-- Settings screen -->
+    <string name="section_service">Service</string>
+    <string name="section_webui">WebUI</string>
+    <string name="section_battery">Battery</string>
+    <string name="section_storage">Storage</string>
+    <string name="section_about">About</string>
+
+    <string name="start_on_boot">Start on boot</string>
+    <string name="start_on_boot_description">Automatically start qBittorrent when the device boots</string>
+
+    <string name="restart_service">Restart</string>
+    <string name="stop_service">Stop</string>
+    <string name="service_stopped">qBittorrent stopped</string>
+    <string name="service_restarting">Restarting qBittorrent…</string>
+
+    <string name="webui_address_format">http://127.0.0.1:%1$d</string>
+    <string name="open_webui_browser">Open in browser</string>
+
+    <string name="battery_optimization_description">Exempt qBittorrent from battery optimization to prevent Android from throttling or killing downloads in the background.</string>
+    <string name="battery_optimization_request">Request exemption</string>
+    <string name="battery_optimization_exempt">Already exempt ✓</string>
+
+    <string name="storage_permission_description">Required on Android 11+ to save torrents to shared storage outside app directories.</string>
+    <string name="storage_permission_request">Grant all-files access</string>
+    <string name="storage_permission_granted">Access granted ✓</string>
+
+    <string name="version_format">Version %1$s</string>
 </resources>
