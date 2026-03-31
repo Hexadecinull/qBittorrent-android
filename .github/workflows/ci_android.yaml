@@ -23,11 +23,9 @@ env:
   ANDROID_API: "26"
   ABI: "arm64-v8a"
   NDK_VERSION: "27.2.12479018"
-  # QT_VERSION is resolved dynamically — see the "Resolve Qt version" step.
-  # Qt mirrors only keep the latest patch of each minor series, so hardcoding
-  # a patch version (e.g. 6.8.1) breaks as soon as a newer patch ships.
-  # QT_SERIES controls which minor series we prefer (falls back to latest 6.x).
-  QT_SERIES: "6.8"
+  # '6.8.*' resolves to the latest available 6.8.x patch on the Qt mirror.
+  # The install-qt-action handles mirror instability that breaks raw aqt.
+  QT_VERSION: "6.8.*"
   OPENSSL_VERSION: "3.3.2"
   BOOST_VERSION: "1.87.0"
   LIBTORRENT_VERSION: "2.0.10"
@@ -62,66 +60,45 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential ninja-build cmake python3-pip \
+            build-essential ninja-build cmake \
             libgl1-mesa-dev libglib2.0-dev libxkbcommon-dev
 
-      - name: Install aqtinstall
-        run: pip3 install "aqtinstall==3.3.0"
-
-      - name: Resolve Qt version
-        run: |
-          # Query the mirror for what is actually available. Qt removes older
-          # patch versions when a new one ships, so any hardcoded patch breaks.
-          # aqt list-qt outputs a space-separated list: "6.7.3 6.8.3 6.9.0 ..."
-          ALL=$(aqt list-qt linux desktop)
-          echo "Available Qt versions: $ALL"
-
-          QT_VERSION=$(echo "$ALL" | tr ' ' '\n' \
-            | grep -E "^${QT_SERIES}\." \
-            | sort -V | tail -1)
-
-          if [[ -z "$QT_VERSION" ]]; then
-            echo "No ${QT_SERIES}.x on mirror — falling back to latest 6.x"
-            QT_VERSION=$(echo "$ALL" | tr ' ' '\n' \
-              | grep -E '^6\.' \
-              | sort -V | tail -1)
-          fi
-
-          if [[ -z "$QT_VERSION" ]]; then
-            echo "ERROR: could not resolve any Qt 6.x version"
-            exit 1
-          fi
-
-          echo "Resolved Qt version: $QT_VERSION"
-          echo "QT_VERSION=$QT_VERSION" >> "$GITHUB_ENV"
-
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/Qt
-          # Key includes the resolved version so each new Qt patch gets its own cache
-          key: qt-${{ env.QT_VERSION }}-linux-desktop-android-arm64-v1
-
+      # install-qt-action@v4 wraps aqt but stays in sync with Qt mirror
+      # infrastructure changes. Raw aqt 3.3.0 is broken for Qt 6.8.x
+      # because Qt restructured their package manifest format.
       - name: Install Qt host tools (gcc_64)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: gcc_64
+          dir: ${{ github.workspace }}/Qt
+          cache: true
+          cache-key-prefix: qt-host
+
+      - name: Save Qt host root and resolved version
         run: |
-          # Qt6::LinguistTools is part of the standard gcc_64 base install.
-          # No -m flag needed — that flag is only for addon modules like
-          # qtcharts, qt3d, qtwebengine, etc.
-          aqt install-qt linux desktop "$QT_VERSION" gcc_64 \
-            -O "${{ github.workspace }}/Qt"
+          echo "QT_HOST_ROOT=${QT_ROOT_DIR}" >> "$GITHUB_ENV"
+          # Extract the resolved patch version from the install path
+          # e.g. /…/Qt/6.8.3/gcc_64  →  6.8.3
+          QT_RESOLVED=$(basename "$(dirname "${QT_ROOT_DIR}")")
+          echo "QT_RESOLVED=${QT_RESOLVED}" >> "$GITHUB_ENV"
 
       - name: Install Qt for Android (arm64-v8a)
-        if: steps.cache-qt.outputs.cache-hit != 'true'
-        run: |
-          aqt install-qt linux android "$QT_VERSION" android_arm64_v8a \
-            -O "${{ github.workspace }}/Qt"
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_RESOLVED }}
+          host: linux
+          target: android
+          arch: android_arm64_v8a
+          dir: ${{ github.workspace }}/Qt
+          cache: true
+          cache-key-prefix: qt-android
 
-      - name: Export Qt paths
+      - name: Save Qt Android root
         run: |
-          echo "QT_HOST_ROOT=${{ github.workspace }}/Qt/${QT_VERSION}/gcc_64"               >> "$GITHUB_ENV"
-          echo "QT_ANDROID_ROOT=${{ github.workspace }}/Qt/${QT_VERSION}/android_arm64_v8a" >> "$GITHUB_ENV"
+          echo "QT_ANDROID_ROOT=${QT_ROOT_DIR}" >> "$GITHUB_ENV"
 
       - name: Cache native dependencies
         id: cache-deps
@@ -133,7 +110,6 @@ jobs:
       - name: Build native dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
-          export ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT}"
           export ANDROID_API="${ANDROID_API}"
           export ABI="${ABI}"
           export OPENSSL_VERSION="${OPENSSL_VERSION}"
@@ -147,7 +123,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: android/build/qbt
-          key: qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_VERSION }}-static-v1
+          key: qbt-${{ hashFiles('src/**', 'CMakeLists.txt', 'cmake/**') }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-qt${{ env.QT_RESOLVED }}-static-v1
 
       - name: Build qBittorrent-nox for Android
         run: |
